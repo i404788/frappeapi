@@ -1,3 +1,26 @@
+# --- 1. Install the patch _before_ anything else touches FastAPI ---
+from fastapi._compat import lenient_issubclass as _orig
+from starlette.responses import JSONResponse as _StarletteJSONResponse
+
+
+def _patched_lenient(cls, parent):
+	from frappeapi.responses import JSONResponse as _FrappeJSONResponse
+
+	if cls is _FrappeJSONResponse and parent is _StarletteJSONResponse:
+		return True
+	return _orig(cls, parent)
+
+
+import fastapi._compat as _compat
+
+_compat.lenient_issubclass = _patched_lenient
+
+# Also update the copies already made inside FastAPI sub‑modules
+import fastapi.openapi.utils as _utils
+
+_utils.lenient_issubclass = _patched_lenient
+
+# --- 2. Now FastAPI can use the patched version ---
 __version__ = "0.1.3"
 
 from fastapi.datastructures import UploadFile  # noqa: F401

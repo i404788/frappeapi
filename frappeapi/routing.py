@@ -50,6 +50,7 @@ from fastapi._compat import (
 	get_missing_field_error,
 	is_bytes_field,
 	is_bytes_sequence_field,
+	lenient_issubclass,
 	sequence_types,
 	serialize_sequence_value,
 	value_is_sequence,
@@ -74,7 +75,6 @@ from fastapi.routing import APIRoute as FastAPIRoute, BaseRoute as FastAPIBaseRo
 from fastapi.types import IncEx
 from fastapi.utils import generate_unique_id, get_value_or_default, is_body_allowed_for_status_code
 from pydantic import BaseModel, PydanticSchemaGenerationError
-from pydantic._internal._utils import lenient_issubclass
 from pydantic.fields import FieldInfo
 from starlette.datastructures import UploadFile as StarletteUploadFile
 from werkzeug.wrappers import (
@@ -806,7 +806,7 @@ class APIRouter:
 	def api_route(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -848,7 +848,7 @@ class APIRouter:
 	def get(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -875,7 +875,7 @@ class APIRouter:
 	def post(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -902,7 +902,7 @@ class APIRouter:
 	def put(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -929,7 +929,7 @@ class APIRouter:
 	def delete(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -956,7 +956,7 @@ class APIRouter:
 	def patch(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -983,7 +983,7 @@ class APIRouter:
 	def options(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -1010,7 +1010,7 @@ class APIRouter:
 	def head(
 		self,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
