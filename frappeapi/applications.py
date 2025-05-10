@@ -5,6 +5,15 @@ from fastapi.datastructures import Default
 from fastapi.params import Depends
 from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugResponse
 
+from frappeapi.fast_routes import (
+	DELETE as _fast_delete,
+	GET as _fast_get,
+	HEAD as _fast_head,
+	OPTIONS as _fast_options,
+	PATCH as _fast_patch,
+	POST as _fast_post,
+	PUT as _fast_put,
+)
 from frappeapi.responses import JSONResponse
 from frappeapi.routing import APIRouter
 
@@ -72,8 +81,66 @@ class FrappeAPI:
 			self.openapi_schema = self.router.openapi()
 		return self.openapi_schema
 
+	# ------------------------------------------------------------------ #
+	# Hybrid decorator helpers
+	# ------------------------------------------------------------------ #
+
+	def _dual(
+		self,
+		starlette_reg: Callable[[str], Callable[[Callable], Callable]],
+		router_reg: Callable[..., Callable[[Callable], Callable]],
+		*,
+		path: str | None,
+		response_model: Any,
+		status_code: Optional[int],
+		description: Optional[str],
+		tags: Optional[List[Union[str, Enum]]],
+		summary: Optional[str],
+		include_in_schema: bool,
+		response_class: Type[WerkzeugResponse],
+		allow_guest: bool,
+		xss_safe: bool,
+	):
+		if path is None:
+			return router_reg(
+				response_model=response_model,
+				status_code=status_code,
+				description=description,
+				tags=tags,
+				summary=summary,
+				include_in_schema=include_in_schema,
+				response_class=response_class,
+				allow_guest=allow_guest,
+				xss_safe=xss_safe,
+			)
+
+		dotted = router_reg(
+			response_model=response_model,
+			status_code=status_code,
+			description=description,
+			tags=tags,
+			summary=summary,
+			include_in_schema=include_in_schema,
+			response_class=response_class,
+			allow_guest=allow_guest,
+			xss_safe=xss_safe,
+		)
+
+		fast = starlette_reg(path)
+
+		def wrapper(fn):
+			dotted(fn)  # dotted‑path for validation/docs
+			return fast(fn)  # Starlette route
+
+		return wrapper
+
+	# ------------------------------------------------------------------ #
+	# Public HTTP verb decorators
+	# ------------------------------------------------------------------ #
+
 	def get(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -86,7 +153,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.get(
+		return self._dual(
+			_fast_get,
+			self.router.get,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -100,6 +170,7 @@ class FrappeAPI:
 
 	def post(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -112,7 +183,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.post(
+		return self._dual(
+			_fast_post,
+			self.router.post,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -126,6 +200,7 @@ class FrappeAPI:
 
 	def put(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -138,7 +213,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.put(
+		return self._dual(
+			_fast_put,
+			self.router.put,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -152,6 +230,7 @@ class FrappeAPI:
 
 	def delete(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -164,7 +243,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.delete(
+		return self._dual(
+			_fast_delete,
+			self.router.delete,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -178,6 +260,7 @@ class FrappeAPI:
 
 	def patch(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -190,7 +273,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.patch(
+		return self._dual(
+			_fast_patch,
+			self.router.patch,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -204,8 +290,9 @@ class FrappeAPI:
 
 	def options(
 		self,
+		path: str | None = None,
 		*,
-		response_model: Any = None,
+		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
 		description: Optional[str] = None,
 		tags: Optional[List[Union[str, Enum]]] = None,
@@ -216,7 +303,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.options(
+		return self._dual(
+			_fast_options,
+			self.router.options,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -230,6 +320,7 @@ class FrappeAPI:
 
 	def head(
 		self,
+		path: str | None = None,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -242,7 +333,10 @@ class FrappeAPI:
 		allow_guest: bool = False,
 		xss_safe: bool = False,
 	):
-		return self.router.head(
+		return self._dual(
+			_fast_head,
+			self.router.head,
+			path=path,
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
