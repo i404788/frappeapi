@@ -34,3 +34,6 @@ from fastapi.params import (
 )
 
 from frappeapi.applications import FrappeAPI  # noqa: F401
+
+# quick re‑export for power users
+from frappeapi.fast_routes import DELETE, GET, HEAD, OPTIONS, PATCH, POST, PUT  # noqa: F401
