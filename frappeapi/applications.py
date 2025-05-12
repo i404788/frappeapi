@@ -5,6 +5,7 @@ from fastapi.datastructures import Default
 from fastapi.params import Depends
 from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugResponse
 
+# Import register_app from fast_routes separately
 from frappeapi.fast_routes import (
 	DELETE as _fast_delete,
 	GET as _fast_get,
@@ -13,6 +14,7 @@ from frappeapi.fast_routes import (
 	PATCH as _fast_patch,
 	POST as _fast_post,
 	PUT as _fast_put,
+	register_app,
 )
 from frappeapi.responses import JSONResponse
 from frappeapi.routing import APIRouter
@@ -40,6 +42,8 @@ class FrappeAPI:
 				Callable[[WerkzeugRequest, Exception], WerkzeugResponse],
 			]
 		] = None,
+		# Feature flag for OpenAPI path style
+		fastapi_path_format: bool = False,
 	):
 		self.title = title
 		self.summary = summary
@@ -52,6 +56,7 @@ class FrappeAPI:
 		self.contact = contact
 		self.license_info = license_info
 		self.separate_input_output_schemas = separate_input_output_schemas
+		self.fastapi_path_format = fastapi_path_format
 		assert self.title, "A title must be provided for OpenAPI, e.g.: 'My API'"
 		assert self.version, "A version must be provided for OpenAPI, e.g.: '1.0.0'"
 
@@ -73,8 +78,12 @@ class FrappeAPI:
 			separate_input_output_schemas=self.separate_input_output_schemas,
 			exception_handlers=self.exception_handlers,
 			default_response_class=default_response_class,
+			fastapi_path_format=self.fastapi_path_format,
 		)
 		self.openapi_schema: Optional[Dict[str, Any]] = None
+
+		# Register this app instance with the fast_routes module for path parameter handling
+		register_app(self)
 
 	def openapi(self) -> Dict[str, Any]:
 		if self.openapi_schema is None:
@@ -90,7 +99,7 @@ class FrappeAPI:
 		starlette_reg: Callable[[str], Callable[[Callable], Callable]],
 		router_reg: Callable[..., Callable[[Callable], Callable]],
 		*,
-		path: str | None,
+		path: str,
 		response_model: Any,
 		status_code: Optional[int],
 		description: Optional[str],
@@ -101,20 +110,9 @@ class FrappeAPI:
 		allow_guest: bool,
 		xss_safe: bool,
 	):
-		if path is None:
-			return router_reg(
-				response_model=response_model,
-				status_code=status_code,
-				description=description,
-				tags=tags,
-				summary=summary,
-				include_in_schema=include_in_schema,
-				response_class=response_class,
-				allow_guest=allow_guest,
-				xss_safe=xss_safe,
-			)
-
+		# Call the router registration with path parameter
 		dotted = router_reg(
+			path=path,  # Now our router methods accept path parameter
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -126,11 +124,15 @@ class FrappeAPI:
 			xss_safe=xss_safe,
 		)
 
+		# Get the fast router function
 		fast = starlette_reg(path)
 
 		def wrapper(fn):
-			dotted(fn)  # dotted‑path for validation/docs
-			return fast(fn)  # Starlette route
+			# Get the dotted-path decorated function first
+			dotted(fn)
+
+			# Apply the fast decorator
+			return fast(fn)
 
 		return wrapper
 
@@ -140,7 +142,7 @@ class FrappeAPI:
 
 	def get(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -170,7 +172,7 @@ class FrappeAPI:
 
 	def post(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -200,7 +202,7 @@ class FrappeAPI:
 
 	def put(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -230,7 +232,7 @@ class FrappeAPI:
 
 	def delete(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -260,7 +262,7 @@ class FrappeAPI:
 
 	def patch(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -290,7 +292,7 @@ class FrappeAPI:
 
 	def options(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -320,7 +322,7 @@ class FrappeAPI:
 
 	def head(
 		self,
-		path: str | None = None,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
