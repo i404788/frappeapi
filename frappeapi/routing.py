@@ -328,8 +328,8 @@ def parse_and_validate_request(
 	# TODO: Headers
 	# Starlette Headers is an immutable, case-insensitive, and a multidict data structure
 	# it allows the same header key to have a multiple values (i.e comma-separated)
-	# But, Until now, Frappe or somthing in between
-	# choose a single Value (e.g., the last occurrence) to represent the header.
+	# But, Until now, Frappe or something in between
+	# choose a single value (e.g., the last occurrence) to represent the header.
 	headers_dict = defaultdict(list)
 	for key, value in request.headers.items():
 		headers_dict[key].append(value)
@@ -352,12 +352,20 @@ def parse_and_validate_request(
 		values.update(body_values)
 		errors.extend(body_errors)
 
+	# Simple fix: Get parameters from request.path_params if available, otherwise from form_dict
+	path_params = {}
+	path_params = request.path_params if hasattr(request, "path_params") else {}
+
+	path_values, path_errors = request_params_to_args(dependant.path_params, path_params)
+
+	# Handle query parameters normally
 	query_values, query_errors = request_params_to_args(dependant.query_params, request_query_params)
 	header_values, header_errors = request_params_to_args(dependant.header_params, request_headers)
 
+	values.update(path_values)
 	values.update(query_values)
 	values.update(header_values)
-	errors += query_errors + header_errors
+	errors += path_errors + query_errors + header_errors
 
 	# TODO: response is expected to be a Starlette Response, but it is WerkzeugResponse
 	return SolvedDependency(values=values, errors=errors, background_tasks=None, response=response, dependency_cache={})
@@ -397,10 +405,32 @@ class APIRoute(FastAPIRoute):
 		# Frappe parameters
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]]
 		| None = None,
+		fastapi_path_format: bool = False,
+		# FastAPI path parameter
+		fastapi_path: Optional[str] = None,
 	):
 		self.prefix = "/api/method"
 		self.endpoint = endpoint
-		self.path = self.prefix + "/" + extract_endpoint_relative_path(self.endpoint) + "." + self.endpoint.__name__
+		self.fastapi_path = fastapi_path
+		self.fastapi_path_format = fastapi_path_format
+
+		# Store both path formats - ensure dotted path always exists
+		self.dotted_path = (
+			self.prefix + "/" + extract_endpoint_relative_path(self.endpoint) + "." + self.endpoint.__name__
+		)
+
+		# Only set rest_path if fastapi_path is provided
+		if fastapi_path:
+			self.rest_path = "/api" + fastapi_path
+		else:
+			# Fall back to dotted path if no fastapi_path is provided
+			self.rest_path = self.dotted_path
+
+		# Determine which path to use in the schema
+		if fastapi_path_format and fastapi_path:
+			self.path = self.rest_path
+		else:
+			self.path = self.dotted_path
 
 		if isinstance(response_model, DefaultPlaceholder):
 			return_annotation = get_typed_return_annotation(self.endpoint)
@@ -427,7 +457,7 @@ class APIRoute(FastAPIRoute):
 		self.responses = responses or {}
 		self.name: Optional[str] = name or getattr(self.endpoint, "__name__", None)  # type: ignore
 		self.path_regex: Optional[Pattern[str]] = None  # type: ignore
-		self.path_format: str = self.path
+		self.path_format: str = self.path  # Critical for OpenAPI generation
 		self.param_convertors: Dict[str, Any] = {}
 
 		if methods is None:
@@ -716,10 +746,10 @@ class APIRoute(FastAPIRoute):
 					# > If the finally clause executes a break, continue or return statement,
 					# exceptions are not re-raised.
 					# > If the try statement reaches a break, continue or return statement,
-					# the finally clause will execute just prior to the break, continue or return statement’s execution.
+					# the finally clause will execute just prior to the break, continue or return statement's execution.
 					# > If a finally clause includes a return statement,
-					# the returned value will be the one from the finally clause’s return statement,
-					# not the value from the try clause’s return statement.
+					# the returned value will be the one from the finally clause's return statement,
+					# not the value from the try clause's return statement.
 					pass
 
 		# TODO:
@@ -765,6 +795,7 @@ class APIRouter:
 		default_response_class: Type[WerkzeugResponse] = Default(WerkzeugResponse),
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]]
 		| None = None,
+		fastapi_path_format: bool = False,
 	):
 		self.default_response_class = default_response_class
 		self.routes: List[APIRoute] = []
@@ -782,9 +813,23 @@ class APIRouter:
 		self.webhooks = webhooks
 		self.servers = servers
 		self.openapi_schema: Optional[Dict[str, Any]] = None
+		self.fastapi_path_format = fastapi_path_format
 
 	def openapi(self) -> Dict[str, Any]:
 		if self.openapi_schema is None:
+			# Pre-process the routes to ensure all paths are valid
+			for route in self.routes:
+				if route.path is None:
+					# Fallback to dotted path if path is None (should never happen with our fixes)
+					route.path = route.dotted_path
+
+				# For FastAPI-style paths, make sure they're properly set if fastapi_path_format is enabled
+				if hasattr(route, "fastapi_path") and route.fastapi_path and self.fastapi_path_format:
+					route.path = route.rest_path
+
+				# Always make sure path_format matches the path
+				route.path_format = route.path
+
 			self.openapi_schema = get_openapi(
 				title=self.title,
 				version=self.version,
@@ -805,6 +850,7 @@ class APIRouter:
 
 	def api_route(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -833,6 +879,8 @@ class APIRouter:
 				summary=summary,
 				include_in_schema=include_in_schema,
 				response_class=current_response_class,
+				fastapi_path_format=self.fastapi_path_format,
+				fastapi_path=path,
 			)
 			self.routes.append(route)
 
@@ -847,6 +895,7 @@ class APIRouter:
 
 	def get(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -860,6 +909,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["GET"],
 			response_model=response_model,
 			status_code=status_code,
@@ -874,6 +924,7 @@ class APIRouter:
 
 	def post(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -887,6 +938,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["POST"],
 			response_model=response_model,
 			status_code=status_code,
@@ -901,6 +953,7 @@ class APIRouter:
 
 	def put(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -914,6 +967,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["PUT"],
 			response_model=response_model,
 			status_code=status_code,
@@ -928,6 +982,7 @@ class APIRouter:
 
 	def delete(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -941,6 +996,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["DELETE"],
 			response_model=response_model,
 			status_code=status_code,
@@ -955,6 +1011,7 @@ class APIRouter:
 
 	def patch(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -968,6 +1025,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["PATCH"],
 			response_model=response_model,
 			status_code=status_code,
@@ -982,6 +1040,7 @@ class APIRouter:
 
 	def options(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -995,6 +1054,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["OPTIONS"],
 			response_model=response_model,
 			status_code=status_code,
@@ -1009,6 +1069,7 @@ class APIRouter:
 
 	def head(
 		self,
+		path: str,
 		*,
 		response_model: Any = Default(None),
 		status_code: Optional[int] = None,
@@ -1022,6 +1083,7 @@ class APIRouter:
 		xss_safe: bool = False,
 	):
 		return self.api_route(
+			path=path,
 			methods=["HEAD"],
 			response_model=response_model,
 			status_code=status_code,
