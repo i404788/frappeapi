@@ -82,7 +82,6 @@ class FrappeAPI:
 		)
 		self.openapi_schema: Optional[Dict[str, Any]] = None
 
-		# Register this app instance with the fast_routes module for path parameter handling
 		register_app(self)
 
 	def openapi(self) -> Dict[str, Any]:
@@ -110,9 +109,13 @@ class FrappeAPI:
 		allow_guest: bool,
 		xss_safe: bool,
 	):
-		# Call the router registration with path parameter
-		dotted = router_reg(
-			path=path,  # Now our router methods accept path parameter
+		# router_reg (e.g. self.router.get) creates and registers an APIRoute instance.
+		# This APIRoute instance holds all metadata and the handle_request logic.
+		# It needs to be created regardless of the fastapi_path_format mode so that
+		# the route is available in self.router.routes for OpenAPI and potentially for
+		# the patched handler if in FastAPI mode.
+		api_route_decorator = router_reg(
+			path=path,  # The FastAPI-style path template, e.g., "/items/{item_id}"
 			response_model=response_model,
 			status_code=status_code,
 			description=description,
@@ -120,21 +123,52 @@ class FrappeAPI:
 			summary=summary,
 			include_in_schema=include_in_schema,
 			response_class=response_class,
-			allow_guest=allow_guest,
-			xss_safe=xss_safe,
+			allow_guest=allow_guest,  # Frappe specific for @whitelist
+			xss_safe=xss_safe,  # Frappe specific for @whitelist
 		)
 
-		# Get the fast router function
-		fast = starlette_reg(path)
+		# starlette_reg (e.g., _fast_get from fast_routes.py) returns a factory
+		# for a pass-through decorator.
+		pass_through_decorator_factory = starlette_reg(path)
 
-		def wrapper(fn):
-			# Get the dotted-path decorated function first
-			dotted(fn)
+		if self.fastapi_path_format:
+			# FastAPI-style paths are primary.
+			# The user's decorated function, when called by Frappe's standard dotted path mechanism,
+			# should be the original, unprocessed function.
+			# FastAPI-style paths will be intercepted and handled by the patched `frappe.api.handle`
+			# using the APIRoute instance created by `api_route_decorator`.
+			def wrapper(fn):
+				# Ensure the APIRoute is created and registered by calling the decorator.
+				# The result (a whitelisted, processing-wrapped function) is not what we
+				# return from *this* wrapper in FastAPI mode for dotted path calls.
+				_ = api_route_decorator(fn)
 
-			# Apply the fast decorator
-			return fast(fn)
+				# pass_through_decorator_factory(fn) returns the original `fn`.
+				return pass_through_decorator_factory(fn)
 
-		return wrapper
+			return wrapper
+		else:
+			# Dotted paths are primary and should be processed by APIRoute's logic.
+			# Warn if the FastAPI-style path template (passed as `path`) contains placeholders,
+			# as these won't be used for dotted path parameter extraction in this mode (yet).
+			if "{" in path and "}" in path:
+				import warnings
+
+				warnings.warn(
+					f"Endpoint defined with FastAPI-style path template ('{path}') while "
+					f"'fastapi_path_format' is False. Path parameters from this template "
+					f"will not be available for dotted path calls. "
+					f"Support for path parameters in dotted paths is planned for a future update.",
+					UserWarning,
+					stacklevel=3,
+				)
+
+			def wrapper(fn):
+				# api_route_decorator(fn) returns a whitelisted function that, when called
+				# (e.g., by Frappe for a dotted path), executes APIRoute.handle_request.
+				return api_route_decorator(fn)
+
+			return wrapper
 
 	# ------------------------------------------------------------------ #
 	# Public HTTP verb decorators
