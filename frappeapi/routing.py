@@ -2,39 +2,24 @@ import dataclasses
 import inspect
 import json
 from collections import defaultdict
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from enum import Enum, IntEnum
-from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union
+from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union, cast
 
 from typing_extensions import Literal
 
-try:
+parse_options_header: Optional[Callable[[str | bytes | None], tuple[bytes, dict[bytes, bytes]]]] = None
+with suppress(ModuleNotFoundError):  # pragma: nocover
 	from python_multipart.multipart import parse_options_header
-except ModuleNotFoundError:  # pragma: nocover
-	parse_options_header = None
 
-# TODO: Have a compelete frappe mock for testing and development
 try:
-	import frappe
-	from frappe import whitelist
+	import frappe  # type: ignore[import-not-found]
+	from frappe import whitelist  # type: ignore[import-not-found]
 except ImportError:
-	from functools import wraps
+	from unittest.mock import MagicMock
 
-	class Frappe:
-		def __getattr__(self, item):
-			return
-
-	frappe = Frappe()
-
-	def whitelist(methods: Optional[List[str]] = None):
-		def decorator(func):
-			@wraps(func)
-			def wrapper(*args, **kwargs):
-				return func(*args, **kwargs)
-
-			return wrapper
-
-		return decorator
+	frappe = MagicMock()
+	whitelist = MagicMock()
 
 
 from fastapi import params
@@ -353,8 +338,10 @@ def parse_and_validate_request(
 		errors.extend(body_errors)
 
 	# Simple fix: Get parameters from request.path_params if available, otherwise from form_dict
-	path_params = {}
-	path_params = request.path_params if hasattr(request, "path_params") else {}
+	_request_path_params_attr = getattr(request, "path_params", None)
+	path_params: Dict[str, Any] = (
+		cast(Dict[str, Any], _request_path_params_attr) if isinstance(_request_path_params_attr, dict) else {}
+	)
 
 	path_values, path_errors = request_params_to_args(dependant.path_params, path_params)
 
@@ -405,32 +392,37 @@ class APIRoute(FastAPIRoute):
 		# Frappe parameters
 		exception_handlers: Dict[Type[Exception], Callable[[WerkzeugRequest, Exception], WerkzeugResponse]]
 		| None = None,
-		fastapi_path_format: bool = False,
-		# FastAPI path parameter
-		fastapi_path: Optional[str] = None,
+		# Instance mode: True for FastAPI-style path matching, False for dotted path matching.
+		fastapi_path_format_flag: bool = False,
+		# The FastAPI-style path template provided by the user, e.g., "/items/{item_id}"
+		user_defined_fastapi_path_segment: Optional[str] = None,
 	):
-		self.prefix = "/api/method"
 		self.endpoint = endpoint
-		self.fastapi_path = fastapi_path
-		self.fastapi_path_format = fastapi_path_format
+		self.fastapi_path_format_flag = fastapi_path_format_flag
+		self.user_defined_fastapi_path_segment = user_defined_fastapi_path_segment
 
-		# Store both path formats - ensure dotted path always exists
+		self.prefix = "/api/method"  # For dotted paths
 		self.dotted_path = (
 			self.prefix + "/" + extract_endpoint_relative_path(self.endpoint) + "." + self.endpoint.__name__
 		)
 
-		# Only set rest_path if fastapi_path is provided
-		if fastapi_path:
-			self.rest_path = "/api" + fastapi_path
-		else:
-			# Fall back to dotted path if no fastapi_path is provided
-			self.rest_path = self.dotted_path
+		self.path_for_starlette_matching: Optional[str] = None
+		self.full_fastapi_path_for_openapi: Optional[str] = None
 
-		# Determine which path to use in the schema
-		if fastapi_path_format and fastapi_path:
-			self.path = self.rest_path
+		if self.user_defined_fastapi_path_segment:
+			self.full_fastapi_path_for_openapi = "/api" + self.user_defined_fastapi_path_segment
+
+		# Determine the primary path for OpenAPI, Dependant, and self.path_format
+		if self.fastapi_path_format_flag and self.user_defined_fastapi_path_segment:
+			# FastAPI mode is active for this app, and this route has a FastAPI path defined.
+			self.path = self.full_fastapi_path_for_openapi
+			self.path_for_starlette_matching = (
+				self.user_defined_fastapi_path_segment
+			)  # Relative path for Starlette matching
 		else:
+			# Dotted path mode is active for this app, or this route doesn't have a FastAPI path segment defined.
 			self.path = self.dotted_path
+			# No Starlette matching will be attempted for this route based on a FastAPI path segment.
 
 		if isinstance(response_model, DefaultPlaceholder):
 			return_annotation = get_typed_return_annotation(self.endpoint)
@@ -474,6 +466,7 @@ class APIRoute(FastAPIRoute):
 			status_code = int(status_code)
 
 		self.status_code = status_code
+		self.path_format = self.path  # Critical for OpenAPI generation and Dependant path param extraction fields
 
 		if self.response_model:
 			assert is_body_allowed_for_status_code(
@@ -517,7 +510,7 @@ class APIRoute(FastAPIRoute):
 		assert callable(endpoint), "endpoint must be a callable"
 
 		self.dependant = get_dependant(
-			path=self.path,
+			path=self.path_format,  # Use the path_format that corresponds to the active routing mode
 			call=self.endpoint,
 		)
 		for depends in self.dependencies[::-1]:
@@ -537,16 +530,38 @@ class APIRoute(FastAPIRoute):
 		self.exception_handlers = {} if exception_handlers is None else exception_handlers
 
 	def handle_request(self, *args, **kwargs) -> WerkzeugResponse:
-		MAX_IN_MEMORY_FILE_SIZE = 1 * 1024 * 1024  # 1MB
+		# Runtime warning if a dotted path is called for an endpoint that was
+		# defined with FastAPI-style path parameters when fastapi_path_format is False.
+		if (
+			not self.fastapi_path_format_flag
+			and self.user_defined_fastapi_path_segment
+			and "{" in self.user_defined_fastapi_path_segment
+			and "}" in self.user_defined_fastapi_path_segment
+		):
+			import warnings
+
+			warnings.warn(
+				f"Dotted path API 'self.dotted_path' called. "
+				f"It was defined with FastAPI-style path template ('{self.user_defined_fastapi_path_segment}') "
+				f"while 'fastapi_path_format' is False for the app. Path parameters from this template "
+				f"are not available for dotted path calls. "
+				f"Support for path parameters in dotted paths is planned.",
+				UserWarning,
+				stacklevel=2,  # Try to point to the caller of handle_request
+			)
+
+		MAX_IN_MEMORY_FILE_SIZE = 1 * 1024 * 1024  # 1MB # noqa: N806
 		request = frappe.request
 		is_body_form = self.body_field and isinstance(self.body_field.field_info, params.Form)
 
-		with ExitStack() as file_stack:
-			try:
-				body: Any = None
-				if self.body_field:
-					if is_body_form:
-						# Ensure python-multipart is available
+		parsed_structured_body: Optional[Union[Dict[str, Any], FormData]] = None
+		body_for_request_validation_error: Any = None
+		actual_body_bytes: Optional[bytes] = None
+
+		try:
+			if self.body_field:
+				if is_body_form:
+					with ExitStack() as file_stack_form_files:
 						assert (
 							parse_options_header is not None
 						), "The `python-multipart` library must be installed to use form parsing."
@@ -589,8 +604,7 @@ class APIRoute(FastAPIRoute):
 											)
 											_items.append((field_name, upload_file))
 											if hasattr(fileobj, "close"):
-												# Attach close callback to the file object
-												file_stack.callback(fileobj.close)
+												file_stack_form_files.callback(fileobj.close)
 									else:
 										# content_length is not set; treat as large file
 										upload_file = UploadFile(
@@ -600,157 +614,164 @@ class APIRoute(FastAPIRoute):
 										)
 										_items.append((field_name, upload_file))
 										if hasattr(fileobj, "close"):
-											file_stack.callback(fileobj.close)
+											file_stack_form_files.callback(fileobj.close)
 								else:
 									# Handle cases where 'read' is not available
 									raise HTTPException(
 										status_code=400,
 										detail=f"Cannot process the uploaded file for field '{field_name}'.",
 									)
-						body = FormData(_items)
-					else:
-						# Handle JSON or other non-form bodies
-						body_bytes = request.get_data()
-						if body_bytes:
-							json_body: Any = Undefined
-							content_type_value = request.headers.get("content-type", "")
-							if not content_type_value:
-								json_body = request.get_json(silent=True)
-							else:
-								import email.message
-
-								message = email.message.Message()
-								message["content-type"] = content_type_value
-								if message.get_content_maintype() == "application":
-									subtype = message.get_content_subtype()
-									if subtype == "json" or subtype.endswith("+json"):
-										json_body = request.get_json(silent=True)
-							body = json_body if json_body != Undefined else body_bytes
-			except json.JSONDecodeError as e:
-				validation_error = RequestValidationError(
-					[
-						{
-							"type": "json_invalid",
-							"loc": ("body", e.pos),
-							"msg": "JSON decode error",
-							"input": {},
-							"ctx": {"error": e.msg},
-						}
-					],
-					body=e.doc,
-				)
-				raise validation_error from e
-			except HTTPException:
-				# If a middleware raises an HTTPException, it should be raised again
-				raise
-			except Exception as e:
-				http_error = HTTPException(status_code=400, detail="There was an error parsing the body")
-				raise http_error from e
-
-			errors: List[Any] = []
-			with ExitStack() as exit_stack:
-				try:
-					solved_result = parse_and_validate_request(
-						request=request,
-						dependant=self.dependant,
-						body=body,
-						exit_stack=exit_stack,
-						embed_body_fields=self._embed_body_fields,
-					)
-					errors = solved_result.errors
-					if not errors:
-						request_data = solved_result.values
-						raw_response = self.endpoint(**request_data)
-
-						if isinstance(raw_response, WerkzeugResponse):
-							# if raw_response.background is None:
-							# 	raw_response.background = solved_result.background_tasks
-							response = raw_response
+						parsed_structured_body = FormData(_items)
+						body_for_request_validation_error = parsed_structured_body
+				else:  # Not form, must be other type of body (e.g. JSON)
+					actual_body_bytes = request.get_data()
+					body_for_request_validation_error = actual_body_bytes
+					if actual_body_bytes:
+						json_parsed_dict: Optional[Dict[str, Any]] = None
+						content_type_value = request.headers.get("content-type", "")
+						if not content_type_value:
+							_json_val = request.get_json(silent=True)
+							if isinstance(_json_val, dict):
+								json_parsed_dict = cast(Dict[str, Any], _json_val)
 						else:
-							# response_args: Dict[str, Any] = {"background": solved_result.background_tasks}
-							response_args: Dict[str, Any] = {}
-							# If status_code was set, use it, otherwise use the default from the
-							# # response class, in the case of redirect it's 307
-							current_status_code = (
-								self.status_code if self.status_code else solved_result.response.status_code
-							)
-							if current_status_code is not None:
-								response_args["status_code"] = current_status_code
-							if solved_result.response.status_code:
-								response_args["status_code"] = solved_result.response.status_code
+							import email.message
 
-							content = serialize_response(
-								field=self.secure_cloned_response_field,
-								response_content=raw_response,
-								include=self.response_model_include,
-								exclude=self.response_model_exclude,
-								by_alias=self.response_model_by_alias,
-								exclude_unset=self.response_model_exclude_unset,
-								exclude_defaults=self.response_model_exclude_defaults,
-								exclude_none=self.response_model_exclude_none,
-							)
+							message = email.message.Message()
+							message["content-type"] = content_type_value
+							if message.get_content_maintype() == "application":
+								subtype = message.get_content_subtype()
+								if subtype == "json" or subtype.endswith("+json"):
+									_json_val = request.get_json(silent=True)
+									if isinstance(_json_val, dict):
+										json_parsed_dict = cast(Dict[str, Any], _json_val)
+						parsed_structured_body = json_parsed_dict
+						if json_parsed_dict is not None:
+							body_for_request_validation_error = json_parsed_dict
 
-							if isinstance(self.response_class, DefaultPlaceholder):
-								actual_response_class = self.response_class.value
-							else:
-								actual_response_class = self.response_class
+		except json.JSONDecodeError as e:
+			body_for_error = e.doc
+			if actual_body_bytes is not None:
+				try:
+					body_for_error = actual_body_bytes.decode()
+				except UnicodeDecodeError:
+					body_for_error = actual_body_bytes
+			validation_error = RequestValidationError(
+				[
+					{
+						"type": "json_invalid",
+						"loc": ("body", e.pos),
+						"msg": "JSON decode error",
+						"input": {},
+						"ctx": {"error": e.msg},
+					}
+				],
+				body=body_for_error,
+			)
+			raise validation_error from e
+		except HTTPException:
+			raise
+		except Exception as e:
+			http_error = HTTPException(status_code=400, detail="There was an error parsing the body or handling files.")
+			raise http_error from e
 
-							response = actual_response_class(content, **response_args)
-							if not is_body_allowed_for_status_code(response.status_code):
-								response.data = b""
+		with ExitStack() as exit_stack_validation:
+			try:
+				solved_result = parse_and_validate_request(
+					request=request,
+					dependant=self.dependant,
+					body=parsed_structured_body,
+					exit_stack=exit_stack_validation,
+					embed_body_fields=self._embed_body_fields,
+				)
+				errors_validation = solved_result.errors
+				if not errors_validation:
+					request_data = solved_result.values
+					raw_response = self.endpoint(**request_data)
 
-							for key, value in solved_result.response.headers.items():
-								if key not in response.headers:
-									response.headers.add(key, value)
-					if errors:
-						validation_error = RequestValidationError(errors, body=body)
-						raise validation_error
-				except RequestValidationError as exc:
-					if self.exception_handlers.get(RequestValidationError):
-						response = self.exception_handlers[RequestValidationError](request, exc)
+					if isinstance(raw_response, WerkzeugResponse):
+						response = raw_response
 					else:
-						response = request_validation_exception_handler(request, exc)
+						response_args: Dict[str, Any] = {}
+						current_status_code = (
+							self.status_code if self.status_code else solved_result.response.status_code
+						)
+						if current_status_code is not None:
+							response_args["status_code"] = current_status_code
+						if solved_result.response.status_code:
+							response_args["status_code"] = solved_result.response.status_code
 
-				except ResponseValidationError as exc:
-					if self.exception_handlers.get(ResponseValidationError):
-						response = self.exception_handlers[ResponseValidationError](request, exc)
-					else:
-						response = response_validation_exception_handler(request, exc)
-				except HTTPException as exc:
-					if self.exception_handlers.get(HTTPException):
-						response = self.exception_handlers[HTTPException](request, exc)
-					else:
-						response = http_exception_handler(request, exc)
-				except Exception as exc:
-					# If any other exception is raised, return a 500 response.
-					# First check if there is a custom exception handler for this exception.
-					# If not, return a 500 response with the exception details.
-					# Subress the exception details to avoid exposing sensitive information.
-					if self.exception_handlers.get(type(exc)):
-						response = self.exception_handlers[type(exc)](request, exc)
-					else:
-						response = JSONResponse(content={"detail": repr(exc)}, status_code=500)
+						content = serialize_response(
+							field=self.secure_cloned_response_field,
+							response_content=raw_response,
+							include=self.response_model_include,
+							exclude=self.response_model_exclude,
+							by_alias=self.response_model_by_alias,
+							exclude_unset=self.response_model_exclude_unset,
+							exclude_defaults=self.response_model_exclude_defaults,
+							exclude_none=self.response_model_exclude_none,
+						)
+
+						if isinstance(self.response_class, DefaultPlaceholder):
+							actual_response_class = self.response_class.value
+						else:
+							actual_response_class = self.response_class
+
+						response = actual_response_class(content, **response_args)
+						if not is_body_allowed_for_status_code(response.status_code):
+							response.data = b""
+
+						for key, value in solved_result.response.headers.items():
+							if key not in response.headers:
+								response.headers.add(key, value)
+				if errors_validation:
+					validation_error = RequestValidationError(errors_validation, body=body_for_request_validation_error)
+					raise validation_error
+			except RequestValidationError as exc:
+				if self.exception_handlers.get(RequestValidationError):
+					response = self.exception_handlers[RequestValidationError](request, exc)
 				else:
-					# The else block will run only if no exception is raised in the try block
-					# So no need to handle anything here. Let Frappe handle DB sync.
-					pass
-				finally:
-					# https://docs.python.org/3/tutorial/errors.html#defining-clean-up-actions
+					response = request_validation_exception_handler(request, exc)
 
-					# > - If an exception occurs during execution of the try clause,
-					# the exception may be handled by an except clause.
-					# > - If the exception is not handled by an except clause,
-					# the exception is re-raised after the finally clause has been executed.
-					# > - An exception could occur during execution of an except or else clause.
-					# Again, the exception is re-raised after the finally clause has been executed.
-					# > If the finally clause executes a break, continue or return statement,
-					# exceptions are not re-raised.
-					# > If the try statement reaches a break, continue or return statement,
-					# the finally clause will execute just prior to the break, continue or return statement's execution.
-					# > If a finally clause includes a return statement,
-					# the returned value will be the one from the finally clause's return statement,
-					# not the value from the try clause's return statement.
-					pass
+			except ResponseValidationError as exc:
+				if self.exception_handlers.get(ResponseValidationError):
+					response = self.exception_handlers[ResponseValidationError](request, exc)
+				else:
+					response = response_validation_exception_handler(request, exc)
+			except HTTPException as exc:
+				if self.exception_handlers.get(HTTPException):
+					response = self.exception_handlers[HTTPException](request, exc)
+				else:
+					response = http_exception_handler(request, exc)
+			except Exception as exc:
+				# If any other exception is raised, return a 500 response.
+				# First check if there is a custom exception handler for this exception.
+				# If not, return a 500 response with the exception details.
+				# Subress the exception details to avoid exposing sensitive information.
+				if self.exception_handlers.get(type(exc)):
+					response = self.exception_handlers[type(exc)](request, exc)
+				else:
+					response = JSONResponse(content={"detail": repr(exc)}, status_code=500)
+			else:
+				# The else block will run only if no exception is raised in the try block
+				# So no need to handle anything here. Let Frappe handle DB sync.
+				pass
+			finally:
+				# https://docs.python.org/3/tutorial/errors.html#defining-clean-up-actions
+
+				# > - If an exception occurs during execution of the try clause,
+				# the exception may be handled by an except clause.
+				# > - If the exception is not handled by an except clause,
+				# the exception is re-raised after the finally clause has been executed.
+				# > - An exception could occur during execution of an except or else clause.
+				# Again, the exception is re-raised after the finally clause has been executed.
+				# > If the finally clause executes a break, continue or return statement,
+				# exceptions are not re-raised.
+				# > If the try statement reaches a break, continue or return statement,
+				# the finally clause will execute just prior to the break, continue or return statement's execution.
+				# > If a finally clause includes a return statement,
+				# the returned value will be the one from the finally clause's return statement,
+				# not the value from the try clause's return statement.
+				pass
 
 		# TODO:
 		# Avoid the error from bubbling up to the user.
@@ -879,8 +900,8 @@ class APIRouter:
 				summary=summary,
 				include_in_schema=include_in_schema,
 				response_class=current_response_class,
-				fastapi_path_format=self.fastapi_path_format,
-				fastapi_path=path,
+				fastapi_path_format_flag=self.fastapi_path_format,
+				user_defined_fastapi_path_segment=path,
 			)
 			self.routes.append(route)
 

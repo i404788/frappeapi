@@ -109,6 +109,7 @@ The goal is to build a better API framework for Frappe.
 ### Miscellaneous
 
 - [ ] Debugging capabilities.
+- [ ] Dotted path parameters: Support for path parameters in traditional Frappe dotted paths (e.g., `/api/method/app.module.controller.method_name/param_value`). (Details to be determined)
 
 ## Related Frappe PRs and Issues
 

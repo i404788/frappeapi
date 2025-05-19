@@ -1,39 +1,42 @@
 """
-Starlette‑style path routing for **FrappeAPI**
+FastAPI-style path routing for **FrappeAPI**
 ==============================================
 
-🎯 Purpose
+Purpose
 ----------
-• Enable decorators like `@app.get("/items/{code}")` next to the existing
-  dotted‑path system.
-• Use routes registered in the FrappeAPI app instance without duplication.
-• Leave every Frappe lifecycle guarantee intact (DB, auth, error handling).
+- Enable decorators like `@app.get("/items/{code}")` next to the existing
+  dotted-path system.
+- Use routes registered in the FrappeAPI app instance without duplication.
+- Leave every Frappe lifecycle guarantee intact (DB, auth, error handling).
 
-🔥 How it works
+How it works
 --------------
 1. Each FrappeAPI instance registers routes in its self.router.routes collection.
-2. At import time we monkey‑patch **`frappe.api.handle`**:
-   • For every `/api/**` request we check against the registered routes.
-   • On a match, we extract path parameters and call the corresponding handler.
-   • If nothing matches we fall back to the original `frappe.api.handle`.
-
-This file is *pure Python*; no Frappe changes on disk are required.
+2. At import time we monkey-patch **`frappe.api.handle`**:
+   - For every `/api/**` request we check against the registered routes.
+   - On a match, we extract path parameters and call the corresponding handler.
+   - If nothing matches we fall back to the original `frappe.api.handle`.
 """
 
 from __future__ import annotations
 
 import types
 from enum import Enum
-from typing import Any, Callable, List, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Callable, List, Optional, Type, Union
 
-import frappe
+if TYPE_CHECKING:
+	from unittest.mock import Mock
+
+	frappe = Mock()
+else:
+	import frappe
+
 from fastapi.datastructures import Default
 from starlette.routing import Match, Route
 from werkzeug.wrappers import Response as WerkzeugResponse
 
 from frappeapi.responses import JSONResponse
 
-# Export the HTTP method decorators
 __all__ = [
 	"GET",
 	"POST",
@@ -45,7 +48,6 @@ __all__ = [
 	"register_app",
 ]
 
-# Keep track of all FrappeAPI instances
 _FRAPPEAPI_INSTANCES = []
 
 
@@ -82,7 +84,6 @@ def _factory(methods: List[str]) -> Callable:
 	return decorator
 
 
-# Create the HTTP method decorators
 GET = _factory(["GET"])
 POST = _factory(["POST"])
 PUT = _factory(["PUT"])
@@ -94,60 +95,71 @@ HEAD = _factory(["HEAD"])
 
 def _install_patch() -> None:
 	"""Install the patch to frappe.api.handle once per process."""
+	# Skip patching during migration
+	if hasattr(frappe, "flags") and getattr(frappe.flags, "in_migrate", False):
+		return
+
 	if getattr(frappe, "_fastapi_path_patch_done", False):
+		return
+
+	# Check if frappe.api exists before attempting to patch
+	if not hasattr(frappe, "api"):
 		return
 
 	orig_handle = frappe.api.handle
 
 	def patched_handle() -> types.ModuleType | dict:
-		# Get the original path
-		original_path = frappe.local.request.path
-		path = original_path
+		request_path = frappe.local.request.path  # Full request path, e.g., /api/items/123
 
-		# Only strip /api/ prefix if it's not a dotted path route (/api/method/)
-		if path.startswith("/api/") and not path.startswith("/api/method/"):
-			path = path[4:]  # Remove /api prefix
+		# Attempt FastAPI-style route matching
+		for app_instance in _FRAPPEAPI_INSTANCES:
+			if not app_instance.fastapi_path_format:
+				continue  # This FrappeAPI instance is not in FastAPI mode, skip it.
 
-		# Check against all registered routes in all FrappeAPI instances
-		for app in _FRAPPEAPI_INSTANCES:
-			# Skip app instances that don't have a router or routes
-			if not hasattr(app, "router") or not hasattr(app.router, "routes"):
+			# Only attempt to match if path starts with /api/ and NOT /api/method/
+			# Standard Frappe dotted paths are /api/method/...
+			if not (request_path.startswith("/api/") and not request_path.startswith("/api/method/")):
+				continue  # Path doesn't look like a FastAPI-style path for this app, try next app or fallback.
+
+			path_segment_to_match = request_path[4:]  # Remove /api/ prefix, e.g., "items/123"
+
+			if not hasattr(app_instance, "router") or not hasattr(app_instance.router, "routes"):
 				continue
 
-			for api_route in app.router.routes:
-				# Skip routes that aren't meant for FastAPI-style paths
-				if not getattr(api_route, "fastapi_path_format", False) or not getattr(api_route, "fastapi_path", None):
+			for api_route in app_instance.router.routes:
+				# api_route.fastapi_path_format_flag is the mode of the APIRoute instance itself.
+				# api_route.path_for_starlette_matching is the relative path like "/items/{item_id}".
+				if not (api_route.fastapi_path_format_flag and api_route.path_for_starlette_matching):
+					# This specific route is not configured for FastAPI matching or has no path segment defined for it.
 					continue
 
-				# Create a scope for Starlette routing
 				scope = {
 					"type": "http",
-					"path": path,
-					"root_path": "",
+					"path": path_segment_to_match,  # Use the path segment for matching
+					"root_path": "",  # Assuming API is effectively mounted at root for Starlette matching here
 					"method": frappe.local.request.method.upper(),
 				}
 
-				# Create a temporary Starlette route for matching
-				# Use the fastapi_path directly to ensure proper matching
-				route_path = api_route.fastapi_path
-				starlette_route = Route(route_path, endpoint=api_route.endpoint, methods=[m for m in api_route.methods])
+				# Create a temporary Starlette route for matching.
+				# Use api_route.path_for_starlette_matching for the route definition.
+				starlette_route = Route(
+					api_route.path_for_starlette_matching,
+					endpoint=api_route.endpoint,  # Endpoint is for Route constructor, not called directly here
+					methods=[m for m in api_route.methods] if api_route.methods else None,
+				)
 
-				match, child = starlette_route.matches(scope)
+				match, child_scope = starlette_route.matches(scope)
 				if match == Match.FULL:
-					# Extract path parameters
-					path_params = child.get("path_params", {})
+					path_params = child_scope.get("path_params", {})
+					frappe.local.request.path_params = path_params
+					# Call the APIRoute's handler, which uses its Dependant
+					# (already configured with the correct path for parameter extraction).
+					response = api_route.handle_request()
+					return response
 
-					try:
-						# Set path_params directly on the request object
-						frappe.local.request.path_params = path_params
-
-						# Use the APIRoute to handle the request
-						response = api_route.handle_request()
-						return response
-					except Exception:
-						raise  # Let Frappe handle the exception
-
-		# No FastAPI-style route matched, fall back to original handler
+		# No FastAPI-style route matched for any app instance in FastAPI mode,
+		# or the path was not a FastAPI-style candidate.
+		# Fall back to the original Frappe handler for dotted paths or other unhandled /api/ calls.
 		return orig_handle()
 
 	frappe.api.handle = patched_handle
