@@ -319,6 +319,15 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#latest-release-v020" class="md-nav__link">
+    <span class="md-ellipsis">
+      Latest Release - v0.2.0 🚀
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#installation" class="md-nav__link">
     <span class="md-ellipsis">
       Installation
@@ -425,8 +434,15 @@
 <h2 id="why">Why?<a class="headerlink" href="#why" title="Permanent link">&para;</a></h2>
 <p>The goal is to build a better API framework for Frappe.</p>
 <p>FrappeAPI follows FastAPI's interface and semantics. For in-depth information about specific features, you can refer to <a href="https://fastapi.tiangolo.com/">FastAPI's documentation</a>.</p>
+<h2 id="latest-release-v020">Latest Release - v0.2.0 🚀<a class="headerlink" href="#latest-release-v020" title="Permanent link">&para;</a></h2>
+<p>The 0.2.0 release introduces <strong>FastAPI-style path routing</strong> - now you can define API endpoints using both traditional Frappe dotted paths and modern FastAPI-style path parameters:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Modern path-based routing with parameters in the URL</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/items/</span><span class="si">{item_id}</span><span class="s2">&quot;</span><span class="p">)</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="k">def</span><span class="w"> </span><span class="nf">get_item</span><span class="p">(</span><span class="n">item_id</span><span class="p">:</span> <span class="nb">str</span><span class="p">):</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>    <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;item_id&quot;</span><span class="p">:</span> <span class="n">item_id</span><span class="p">}</span>
+</code></pre></div>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>frappeapi
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>frappeapi
 </code></pre></div>
 
 
