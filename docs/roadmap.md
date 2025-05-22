@@ -1,3 +1,7 @@
+---
+title: FrappeAPI Roadmap & Future Features
+description: Discover the planned features and future direction for FrappeAPI, including support for new Frappe versions, enhanced API capabilities, and deeper integration with the Frappe Framework.
+---
 # Roadmap
 
 ## Frappe Versions

@@ -1,6 +1,96 @@
+---
+title: Usage Examples - FrappeAPI | FastAPI-Style Routing & More
+description: Learn how to use FrappeAPI with practical examples, including FastAPI-style path routing, query and body parameters, file uploads, response models, error handling, and more for Frappe Framework.
+---
 # Usage Examples
 
 > **Note**: FrappeAPI follows FastAPI's interface and semantics. For in-depth information about specific features, you can refer to [FastAPI's documentation](https://fastapi.tiangolo.com/).
+
+## FastAPI-Style Path Routing (New in v0.2.0)
+
+FrappeAPI now supports FastAPI-style path routing, allowing you to define endpoints using path parameters directly in the URL path:
+
+### 1. Enabling FastAPI-Style Paths
+
+To use FastAPI-style paths, set the `fastapi_path_format` flag when creating your app:
+
+```python
+from frappeapi import FrappeAPI
+
+# Enable FastAPI-style paths
+app = FrappeAPI(
+    title="My API",
+    version="1.0.0",
+    # Enable FastAPI-style paths
+    fastapi_path_format=True
+)
+```
+
+### 2. Defining Path-Based Routes
+
+With FastAPI-style paths enabled, you can define routes with path parameters:
+
+```python
+# Path parameter in URL
+@app.get("/items/{item_id}")
+def get_item(item_id: str):
+    # item_id is automatically extracted from the URL
+    return {"id": item_id}
+
+# GET https://example.com/api/items/abc123
+# Response: {"id": "abc123"}
+```
+
+```python
+# Multiple path parameters
+@app.get("/users/{user_id}/orders/{order_id}")
+def get_user_order(user_id: str, order_id: int):
+    return {"user_id": user_id, "order_id": order_id}
+
+# GET https://example.com/api/users/john/orders/42
+# Response: {"user_id": "john", "order_id": 42}
+```
+
+### 3. Path Parameters with Type Validation
+
+Path parameters support the same type validation as query parameters:
+
+```python
+from enum import Enum
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+
+@app.get("/orders/status/{status}")
+def get_orders_by_status(status: OrderStatus):
+    # status is validated against the enum
+    return {"status": status, "message": f"Fetching orders with status: {status}"}
+
+# GET https://example.com/api/orders/status/shipped
+# Response: {"status": "shipped", "message": "Fetching orders with status: shipped"}
+```
+
+### 4. Combining Path and Query Parameters
+
+You can combine path parameters with query parameters:
+
+```python
+@app.get("/products/{category}")
+def list_products(
+    category: str,           # Path parameter
+    sort_by: str = "name",   # Query parameter
+    limit: int = 10          # Query parameter
+):
+    return {
+        "category": category,
+        "sort_by": sort_by,
+        "limit": limit
+    }
+# GET https://example.com/api/products/electronics?sort_by=price&limit=20
+# Response: {"category": "electronics", "sort_by": "price", "limit": 20}
+```
 
 ## Query Parameters
 

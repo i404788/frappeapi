@@ -1,3 +1,7 @@
+---
+title: OpenAPI Documentation Setup - FrappeAPI
+description: Guide to setting up automatic OpenAPI (Swagger UI) documentation for your FrappeAPI applications within the Frappe Framework.
+---
 # Setting Up OpenAPI Documentation in Frappe
 
 This guide explains how to set up automatic OpenAPI documentation using Swagger UI in your Frappe application.
@@ -10,7 +14,7 @@ mkdir -p templates/pages/docs/
 
 `/docs` is the directory where the Swagger UI will be served from `http://{site}.com/docs`. You can change this to any directory you want.
 
-## 2. Create `index.html` inside the `docs` directory, add the following code:
+## 2. Create `index.html` inside the `docs` directory, add the following code
 
 ```html
 {% extends "templates/web.html" %}
@@ -71,17 +75,20 @@ mkdir -p templates/pages/docs/
 
 ```
 
-## 3. Create `index.py` inside the `docs` directory, with the following code:
+## 3. Create `index.py` inside the `docs` directory, with the following code
 
 ```python
 # import your FrappeAPI app
 from your_app.apis import app
 
 # openapi() is a method that returns the auto-generated OpenAPI schema
-# You could add more context to the ctx object to pass additional data to the template
-# For example, you could add a "title" or "description" to the API docs
 def get_context(ctx):
-    ctx.data = app.openapi()
+  # Check if user is authenticated, if not redirect to login page
+  if not frappe.session.user or frappe.session.user == "Guest":
+    frappe.local.flags.redirect_location = "/login?redirect-to=" + frappe.request.path
+    raise frappe.Redirect
+
+  ctx.data = app.openapi()
 ```
 
 ## 4. Access Documentation
