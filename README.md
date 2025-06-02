@@ -11,7 +11,7 @@ The goal is to build a better API framework for Frappe.
 ### Frappe Versions
 
 - [x] Frappe V14 support
-- [ ] Frappe V15 support
+- [x] Frappe V15 support
 
 ### Methods
 
