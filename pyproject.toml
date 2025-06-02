@@ -13,30 +13,55 @@ authors = [
     { name = "Muhammad Saif", email = "muhamed.e.saif@gmail.com" },
 ]
 classifiers = [
-    "Intended Audience :: Information Technology",
-    "Intended Audience :: System Administrators",
-    "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python",
-    "Topic :: Internet",
-    "Topic :: Software Development :: Libraries :: Application Frameworks",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: Libraries",
-    "Topic :: Software Development",
+    # Development Status
     "Development Status :: 4 - Beta",
+    
+    # Environment
     "Environment :: Web Environment",
+    
+    # Framework
     "Framework :: FastAPI",
     "Framework :: Pydantic",
+    
+    # Intended Audience
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: System Administrators",
+    
+    # License
     "License :: OSI Approved :: MIT License",
+    
+    # Operating System
+    "Operating System :: OS Independent",
+    
+    # Programming Language
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    
+    # Topic - Internet & Web
+    "Topic :: Internet",
     "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Internet :: WWW/HTTP :: Dynamic Content",
+    "Topic :: Internet :: WWW/HTTP :: WSGI :: Application",
+    
+    # Topic - Software Development
+    "Topic :: Software Development",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Code Generators",
+    "Topic :: Software Development :: Object Brokering",
+    
+    # Topic - Database & API
+    "Topic :: Database",
+    "Topic :: Database :: Database Engines/Servers",
+    "Topic :: Database :: Front-Ends",
+    
+    # Typing
+    "Typing :: Typed",
 ]
 dependencies = [
     "pydantic==2.6.4,<3.0.0",
