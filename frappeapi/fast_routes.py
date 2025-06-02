@@ -57,8 +57,6 @@ def register_app(app):
 		_FRAPPEAPI_INSTANCES.append(app)
 
 
-# HTTP method decorators (used by FrappeAPI._dual)
-# These are simple pass-through functions that delegate to the router
 def _factory(methods: List[str]) -> Callable:
 	def decorator(
 		path: str,
@@ -75,8 +73,7 @@ def _factory(methods: List[str]) -> Callable:
 		fastapi_path_format: bool = False,
 	) -> Callable[[Callable], Callable]:
 		def register(func: Callable) -> Callable:
-			# This is just a pass-through - the actual registration happens in applications.py
-			# via the FrappeAPI._dual method
+			# This is just a pass-through - the actual registration happens in applications.py via the FrappeAPI._dual method
 			return func
 
 		return register
@@ -95,33 +92,32 @@ HEAD = _factory(["HEAD"])
 
 def _install_patch() -> None:
 	"""Install the patch to frappe.api.handle once per process."""
-	# Skip patching during migration
 	if hasattr(frappe, "flags") and getattr(frappe.flags, "in_migrate", False):
 		return
 
 	if getattr(frappe, "_fastapi_path_patch_done", False):
 		return
 
-	# Check if frappe.api exists before attempting to patch
 	if not hasattr(frappe, "api"):
 		return
 
 	orig_handle = frappe.api.handle
 
 	def patched_handle() -> types.ModuleType | dict:
-		request_path = frappe.local.request.path  # Full request path, e.g., /api/items/123
+		request_path = frappe.local.request.path
 
-		# Attempt FastAPI-style route matching
 		for app_instance in _FRAPPEAPI_INSTANCES:
 			if not app_instance.fastapi_path_format:
-				continue  # This FrappeAPI instance is not in FastAPI mode, skip it.
+				continue
 
-			# Only attempt to match if path starts with /api/ and NOT /api/method/
-			# Standard Frappe dotted paths are /api/method/...
-			if not (request_path.startswith("/api/") and not request_path.startswith("/api/method/")):
-				continue  # Path doesn't look like a FastAPI-style path for this app, try next app or fallback.
+			if not (
+				request_path.startswith("/api/")
+				and not request_path.startswith("/api/method/")
+				and not request_path.startswith("/api/resource/")
+			):
+				continue
 
-			path_segment_to_match = request_path[4:]  # Remove /api/ prefix, e.g., "items/123"
+			path_segment_to_match = request_path[4:]
 
 			if not hasattr(app_instance, "router") or not hasattr(app_instance.router, "routes"):
 				continue
@@ -130,21 +126,19 @@ def _install_patch() -> None:
 				# api_route.fastapi_path_format_flag is the mode of the APIRoute instance itself.
 				# api_route.path_for_starlette_matching is the relative path like "/items/{item_id}".
 				if not (api_route.fastapi_path_format_flag and api_route.path_for_starlette_matching):
-					# This specific route is not configured for FastAPI matching or has no path segment defined for it.
 					continue
 
 				scope = {
 					"type": "http",
-					"path": path_segment_to_match,  # Use the path segment for matching
-					"root_path": "",  # Assuming API is effectively mounted at root for Starlette matching here
+					"path": path_segment_to_match,
+					"root_path": "",
 					"method": frappe.local.request.method.upper(),
 				}
 
 				# Create a temporary Starlette route for matching.
-				# Use api_route.path_for_starlette_matching for the route definition.
 				starlette_route = Route(
 					api_route.path_for_starlette_matching,
-					endpoint=api_route.endpoint,  # Endpoint is for Route constructor, not called directly here
+					endpoint=api_route.endpoint,
 					methods=[m for m in api_route.methods] if api_route.methods else None,
 				)
 
@@ -152,8 +146,6 @@ def _install_patch() -> None:
 				if match == Match.FULL:
 					path_params = child_scope.get("path_params", {})
 					frappe.local.request.path_params = path_params
-					# Call the APIRoute's handler, which uses its Dependant
-					# (already configured with the correct path for parameter extraction).
 					response = api_route.handle_request()
 					return response
 
@@ -166,5 +158,4 @@ def _install_patch() -> None:
 	frappe._fastapi_path_patch_done = True
 
 
-# Install the patch when this module is imported
 _install_patch()
