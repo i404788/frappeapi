@@ -103,7 +103,7 @@ def _install_patch() -> None:
 
 	orig_handle = frappe.api.handle
 
-	def patched_handle() -> types.ModuleType | dict:
+	def patched_handle(request=None) -> types.ModuleType | dict:
 		request_path = frappe.local.request.path
 
 		for app_instance in _FRAPPEAPI_INSTANCES:
