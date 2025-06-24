@@ -152,6 +152,8 @@ def _install_patch() -> None:
 		# No FastAPI-style route matched for any app instance in FastAPI mode,
 		# or the path was not a FastAPI-style candidate.
 		# Fall back to the original Frappe handler for dotted paths or other unhandled /api/ calls.
+		if request:
+			return orig_handle(request)
 		return orig_handle()
 
 	frappe.api.handle = patched_handle
