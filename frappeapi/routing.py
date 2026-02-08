@@ -603,8 +603,9 @@ class APIRoute(FastAPIRoute):
 												headers=request_headers,
 											)
 											_items.append((field_name, upload_file))
-											if hasattr(fileobj, "close"):
-												file_stack_form_files.callback(fileobj.close)
+											# FIXME: add callbacks for after body handling
+											# if hasattr(fileobj, "close"):
+											# 	file_stack_form_files.callback(fileobj.close)
 									else:
 										# content_length is not set; treat as large file
 										upload_file = UploadFile(
@@ -613,8 +614,8 @@ class APIRoute(FastAPIRoute):
 											headers=request_headers,
 										)
 										_items.append((field_name, upload_file))
-										if hasattr(fileobj, "close"):
-											file_stack_form_files.callback(fileobj.close)
+										# if hasattr(fileobj, "close"):
+										# 	file_stack_form_files.callback(fileobj.close)
 								else:
 									# Handle cases where 'read' is not available
 									raise HTTPException(
