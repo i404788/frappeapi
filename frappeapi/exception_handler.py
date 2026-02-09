@@ -3,6 +3,7 @@ from werkzeug.wrappers import Request as WerkzeugRequest, Response as WerkzeugRe
 
 from frappeapi.exceptions import HTTPException, RequestValidationError, ResponseValidationError
 from frappeapi.responses import JSONResponse
+import traceback
 
 
 def request_validation_exception_handler(request: WerkzeugRequest, exc: RequestValidationError) -> WerkzeugResponse:
@@ -14,6 +15,7 @@ def http_exception_handler(request: WerkzeugRequest, exc: HTTPException) -> Werk
 	if not is_body_allowed_for_status_code(exc.status_code):
 		return JSONResponse(status_code=exc.status_code, headers=headers)
 
+	print(traceback.format_exc())
 	return JSONResponse(content={"detail": exc.detail}, status_code=exc.status_code, headers=headers)
 
 
@@ -25,4 +27,5 @@ def response_validation_exception_handler(request: WerkzeugRequest, exc: Respons
 	> not returning what it should, and it will return a server error instead of returning incorrect data.
 	> This way you and your clients can be certain that they will receive the data and the data shape expected.
 	"""
+	print(traceback.format_exc())
 	return JSONResponse(content={"detail": exc.errors()}, status_code=500)
