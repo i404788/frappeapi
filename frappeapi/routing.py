@@ -784,8 +784,6 @@ class APIRoute(FastAPIRoute):
 			if response is None:
 				raise FrappeAPIError("No response object was returned.")
 		except FrappeAPIError:
-			import traceback
-
 			traceback.print_stack()
 			traceback.print_exc()
 
