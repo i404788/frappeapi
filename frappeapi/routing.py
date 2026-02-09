@@ -5,7 +5,7 @@ from collections import defaultdict
 from contextlib import ExitStack, suppress
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union, cast
-
+import traceback
 from typing_extensions import Literal
 
 parse_options_header: Optional[Callable[[str | bytes | None], tuple[bytes, dict[bytes, bytes]]]] = None
@@ -751,6 +751,7 @@ class APIRoute(FastAPIRoute):
 				if self.exception_handlers.get(type(exc)):
 					response = self.exception_handlers[type(exc)](request, exc)
 				else:
+					frappe.log_error(traceback.format_exc(), "Response Validation Exception")
 					response = JSONResponse(content={"detail": repr(exc)}, status_code=500)
 			else:
 				# The else block will run only if no exception is raised in the try block
