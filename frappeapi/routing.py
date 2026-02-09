@@ -595,7 +595,7 @@ class APIRoute(FastAPIRoute):
 											# Small file: Read content into memory
 											file_content = fileobj.read()
 											_items.append((field_name, file_content))
-											fileobj.close()  # Explicitly close the file
+											# fileobj.close()  # Explicitly close the file
 										else:
 											# Large file: Wrap in UploadFile without reading
 											upload_file = UploadFile(
