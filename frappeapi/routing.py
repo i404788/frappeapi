@@ -748,7 +748,7 @@ class APIRoute(FastAPIRoute):
 				# First check if there is a custom exception handler for this exception.
 				# If not, return a 500 response with the exception details.
 				# Subress the exception details to avoid exposing sensitive information.
-				frappe.log_error(traceback.format_exc(), "Unknown Exception")
+				# frappe.log_error(traceback.format_exc(), "Unknown Exception")
 				traceback.print_exc()
 				if self.exception_handlers.get(type(exc)):
 					response = self.exception_handlers[type(exc)](request, exc)
