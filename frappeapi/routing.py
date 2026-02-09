@@ -5,7 +5,6 @@ from collections import defaultdict
 from contextlib import ExitStack, suppress
 from enum import Enum, IntEnum
 from typing import Any, Callable, Dict, List, Optional, Pattern, Sequence, Set, Tuple, Type, Union, cast
-import traceback
 from typing_extensions import Literal
 
 parse_options_header: Optional[Callable[[str | bytes | None], tuple[bytes, dict[bytes, bytes]]]] = None
@@ -744,6 +743,7 @@ class APIRoute(FastAPIRoute):
 				else:
 					response = http_exception_handler(request, exc)
 			except Exception as exc:
+				import traceback
 				# If any other exception is raised, return a 500 response.
 				# First check if there is a custom exception handler for this exception.
 				# If not, return a 500 response with the exception details.
@@ -784,6 +784,7 @@ class APIRoute(FastAPIRoute):
 			if response is None:
 				raise FrappeAPIError("No response object was returned.")
 		except FrappeAPIError:
+			import traceback
 			traceback.print_stack()
 			traceback.print_exc()
 
